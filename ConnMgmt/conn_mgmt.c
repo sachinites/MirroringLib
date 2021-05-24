@@ -32,7 +32,6 @@ static void
 conn_mgmt_init_conn_thread(
 	conn_mgmt_conn_thread_t *conn_thread) {
 
-    pthread_mutex_init(&conn_thread->mutex, 0);
     pthread_cond_init(&conn_thread->cv, 0);
     conn_thread->thread_fn = 0;
     conn_thread->thread_fn_arg = 0;
@@ -53,15 +52,42 @@ conn_mgmt_create_new_connection(
 	conn->ka_recvd = 0;
 	conn->ka_sent = 0;
 	conn->down_count = 0;
+    pthread_mutex_init(&conn->conn_mutex, NULL);
+    conn->pause_sending_kas = false;
+    memset(conn->ka_msg.ka_msg, 0, sizeof(conn->ka_msg.ka_msg));
+    conn->ka_msg.ka_msg_size = 0;
 	return conn;
+}
+
+bool
+conn_mgmt_pause_sending_kas(
+        conn_mgmt_conn_state_t *conn) {
+
+    pthread_mutex_lock(&conn->conn_mutex);
+    conn->pause_sending_kas = true;
+    pthread_mutex_unlock(&conn->conn_mutex);
+}
+
+void
+conn_mgmt_resume_sending_kas(
+        conn_mgmt_conn_state_t *conn) {
+
+    pthread_mutex_lock(&conn->conn_mutex);
+    conn->pause_sending_kas = false;
+    pthread_cond_signal(&conn->conn_thread.cv);
+    pthread_mutex_unlock(&conn->conn_mutex);
 }
 
 void
 conn_mgmt_set_conn_ka_interval(
         conn_mgmt_conn_state_t *conn,
         uint32_t ka_interval) {
-    
+   
+    conn_mgmt_pause_sending_kas(conn);
+    pthread_mutex_lock(&conn->conn_mutex);
     conn->keep_alive_interval = ka_interval;
+    pthread_mutex_unlock(&conn->conn_mutex);
+    conn_mgmt_resume_sending_kas(conn);
 }
 
 #define MAX_PACKET_BUFFER_SIZE 256
@@ -73,6 +99,7 @@ pkt_receive( conn_mgmt_conn_state_t *conn,
 			 unsigned char *pkt,
 			 uint32_t pkt_size) {
 
+    printf("%s() Called ....\n", __FUNCTION__);
 }
 
 
@@ -95,12 +122,12 @@ conn_mgmt_pkt_recv(void *arg) {
     	memset(recv_buffer, 0, MAX_PACKET_BUFFER_SIZE);
         bytes_recvd = recvfrom(conn->sock_fd, 
 							   (char *)recv_buffer, 
-                               MAX_PACKET_BUFFER_SIZE, 0, (struct sockaddr *)&sender_addr, &addr_len);
+                               MAX_PACKET_BUFFER_SIZE, 0,
+                               (struct sockaddr *)&sender_addr,
+                               &addr_len);
                 
         pkt_receive(conn, recv_buffer, bytes_recvd);
-    }    
-    
-	
+    }
     return 0;
 }
 
@@ -142,7 +169,7 @@ prepare_ka_pkt (conn_mgmt_conn_state_t *conn,
 				unsigned char *ka_pkt,
 				uint32_t ka_pkt_size) {
 
-	return 0;
+	return CONN_MGMT_KA_PKT_MAX_SIZE;
 }
 
 static void *
@@ -151,20 +178,29 @@ conn_mgmt_send_ka_pkt(void *arg) {
 	conn_mgmt_conn_state_t *conn =
 		(conn_mgmt_conn_state_t *)arg;
 
-	unsigned char *ka_pkt = calloc(1, CONN_MGMT_KA_PKT_MAX_SIZE);
-	
-	int pkt_size = prepare_ka_pkt(conn, ka_pkt, CONN_MGMT_KA_PKT_MAX_SIZE);
-	
+	conn->ka_msg.ka_msg_size = 
+        prepare_ka_pkt(conn, 
+                       conn->ka_msg.ka_msg,
+                       sizeof(conn->ka_msg.ka_msg));
+
 	while(1) {
 	
 		send_udp_msg (conn->conn_key.dest_ip,
 					  conn->conn_key.dst_port_no,
-					  ka_pkt, pkt_size,
+					  conn->ka_msg.ka_msg,
+                      conn->ka_msg.ka_msg_size,
 					  conn->sock_fd);
 					  
 		conn->ka_sent++;
 		sleep(conn->keep_alive_interval);
 		printf("%s() called ....\n", __FUNCTION__);
+
+        pthread_mutex_lock(&conn->conn_mutex);
+
+        while (conn->pause_sending_kas) {
+            pthread_cond_wait(&conn->conn_thread.cv, &conn->conn_mutex);
+        }
+        pthread_mutex_unlock(&conn->conn_mutex);
 	}
 	
 	return NULL;
@@ -210,7 +246,10 @@ conn_mgmt_start_connection(
     sender_addr.sin_port        = conn->conn_key.src_port_no;
     sender_addr.sin_addr.s_addr = INADDR_ANY;
     
-    if (bind(conn->sock_fd, (struct sockaddr *)&sender_addr, sizeof(struct sockaddr)) == -1) {
+    if (bind(conn->sock_fd,
+             (struct sockaddr *)&sender_addr,
+             sizeof(struct sockaddr)) == -1) {
+
         printf("Error : socket bind failed\n");
         return;
     }
@@ -226,20 +265,29 @@ conn_mgmt_start_connection(
 int
 main(int argc, char **argv) {
 
-	conn_mgmt_conn_key_t conn_key;
 	conn_mgmt_conn_state_t *conn;
-	
-	strncpy((char *)&conn_key.dest_ip, "127.0.0.1", 16);
-	strncpy((char *)&conn_key.src_ip,  "127.0.0.1", 16);
-	conn_key.src_port_no = 40000;
-	conn_key.dst_port_no = 40001;
-	conn_key.proto = COMM_MGMT_PROTO_UDP;
-	
+	conn_mgmt_conn_key_t conn_key;
+
+    if (argc != 5) {
+
+        printf("Usage : ./<executable> <src ip> <src port no> "
+                "<dst ip> <dst port no>\n");
+        return 0;
+    }
+
+	strncpy((char *)&conn_key.src_ip,  argv[1], 16);
+	conn_key.src_port_no = atoi(argv[2]);
+	strncpy((char *)&conn_key.dest_ip, argv[3], 16);
+	conn_key.dst_port_no = atoi(argv[4]);
+
+    /* Create a new connection Object */
 	conn = conn_mgmt_create_new_connection(&conn_key);
-	
+    /* Set KA interval, if not set, default shall be used */
+    conn_mgmt_set_conn_ka_interval(conn, 2);
+    /* Start send KA msgs, and get ready to recv msgs */
 	conn_mgmt_start_connection(conn);
 	
 	pthread_exit(0);
+    return 0;
 }
-
 

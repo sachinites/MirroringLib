@@ -54,9 +54,6 @@ init_glthread(glthread_t *glthread);
 void
 glthread_add_last(glthread_t *base_glthread, glthread_t *new_glthread);
 
-#define IS_QUEUED_UP_IN_THREAD(glthreadptr) \
-	(!((glthreadptr)->right == 0 && (glthreadptr)->left == 0))
-
 #define IS_GLTHREAD_LIST_EMPTY(glthreadptr)         \
     ((glthreadptr)->right == 0 && (glthreadptr)->left == 0)
 
@@ -95,8 +92,6 @@ glthread_priority_insert(glthread_t *base_glthread,
                          int (*comp_fn)(void *, void *),
                          int offset);
 
-glthread_t *
-dequeue_glthread_first(glthread_t *base_glthread);
 
 #if 0
 void *
