@@ -83,29 +83,24 @@ conn_mgmt_pkt_recv(void *arg) {
     
     int addr_len = sizeof(struct sockaddr);
     
-    int udp_sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP );
-    
     conn_mgmt_conn_state_t *conn = (conn_mgmt_conn_state_t *)arg;
     
-    struct sockaddr_in sender_addr;
+	struct sockaddr_in sender_addr;
     sender_addr.sin_family      = AF_INET;
     sender_addr.sin_port        = conn->conn_key.src_port_no;
     sender_addr.sin_addr.s_addr = INADDR_ANY;
-    
-    if (bind(udp_sock_fd, (struct sockaddr *)&sender_addr, sizeof(struct sockaddr)) == -1) {
-        printf("Error : socket bind failed\n");
-        return 0;
-    }
-    
+	
     while(1) {
     
     	memset(recv_buffer, 0, MAX_PACKET_BUFFER_SIZE);
-        bytes_recvd = recvfrom(udp_sock_fd, (char *)recv_buffer, 
-                        MAX_PACKET_BUFFER_SIZE, 0, (struct sockaddr *)&sender_addr, &addr_len);
+        bytes_recvd = recvfrom(conn->sock_fd, 
+							   (char *)recv_buffer, 
+                               MAX_PACKET_BUFFER_SIZE, 0, (struct sockaddr *)&sender_addr, &addr_len);
                 
         pkt_receive(conn, recv_buffer, bytes_recvd);
     }    
     
+	
     return 0;
 }
 
@@ -122,11 +117,57 @@ conn_mgmt_start_pkt_recvr_thread(conn_mgmt_conn_state_t *conn) {
                     conn_mgmt_pkt_recv, (void *)conn);
 }
 
+static int
+send_udp_msg(char *dest_ip_addr,
+             uint32_t dest_port_no,
+             char *msg,
+             uint32_t msg_size,
+			 int sock_fd) {
+    
+	struct sockaddr_in dest;
+
+    dest.sin_family = AF_INET;
+    dest.sin_port = dest_port_no;
+    struct hostent *host = (struct hostent *)gethostbyname(dest_ip_addr);
+    dest.sin_addr = *((struct in_addr *)host->h_addr);
+    int addr_len = sizeof(struct sockaddr);
+
+    return sendto(sock_fd, msg, msg_size,
+            0, (struct sockaddr *)&dest,
+            sizeof(struct sockaddr));
+}
+
+static int
+prepare_ka_pkt (conn_mgmt_conn_state_t *conn,
+				unsigned char *ka_pkt,
+				uint32_t ka_pkt_size) {
+
+	return 0;
+}
 
 static void *
 conn_mgmt_send_ka_pkt(void *arg) {
 
+	conn_mgmt_conn_state_t *conn =
+		(conn_mgmt_conn_state_t *)arg;
+
+	unsigned char *ka_pkt = calloc(1, CONN_MGMT_KA_PKT_MAX_SIZE);
 	
+	int pkt_size = prepare_ka_pkt(conn, ka_pkt, CONN_MGMT_KA_PKT_MAX_SIZE);
+	
+	while(1) {
+	
+		send_udp_msg (conn->conn_key.dest_ip,
+					  conn->conn_key.dst_port_no,
+					  ka_pkt, pkt_size,
+					  conn->sock_fd);
+					  
+		conn->ka_sent++;
+		sleep(conn->keep_alive_interval);
+		printf("%s() called ....\n", __FUNCTION__);
+	}
+	
+	return NULL;
 }
 
 static void
@@ -138,7 +179,7 @@ conn_mgmt_start_ka_sending_thread(
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
-    pthread_create(&conn->ka_thread_handle, &attr, 
+    pthread_create(&conn->conn_thread.ka_thread_handle, &attr, 
                     conn_mgmt_send_ka_pkt, (void *)conn);
 }
 
@@ -148,11 +189,57 @@ conn_mgmt_start_connection(
         conn_mgmt_conn_state_t *conn) {
 
     assert(conn->keep_alive_interval);
-
+	
+	/* Dont start the connection again */
+	if (conn->sock_fd > 0) {
+		assert(0);
+	}
+	
+    int udp_sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP );
+	
+	if (udp_sock_fd < 0 ) {
+		printf("Socket creation failed, error no = %d\n", udp_sock_fd);
+		return;
+	}
+	
+	/*This Socket FD shall be used to send and recv pkts */
+    conn->sock_fd = udp_sock_fd;
+	
+	struct sockaddr_in sender_addr;
+    sender_addr.sin_family      = AF_INET;
+    sender_addr.sin_port        = conn->conn_key.src_port_no;
+    sender_addr.sin_addr.s_addr = INADDR_ANY;
+    
+    if (bind(conn->sock_fd, (struct sockaddr *)&sender_addr, sizeof(struct sockaddr)) == -1) {
+        printf("Error : socket bind failed\n");
+        return;
+    }
+    
+	/* Start the thread to recv KA msgs from the other machine */
     conn_mgmt_start_pkt_recvr_thread(conn);
+	
+	/*Start the thread to send periodic KA messags */
     conn_mgmt_start_ka_sending_thread(conn);
 }
 
 
+int
+main(int argc, char **argv) {
+
+	conn_mgmt_conn_key_t conn_key;
+	conn_mgmt_conn_state_t *conn;
+	
+	strncpy((char *)&conn_key.dest_ip, "127.0.0.1", 16);
+	strncpy((char *)&conn_key.src_ip,  "127.0.0.1", 16);
+	conn_key.src_port_no = 40000;
+	conn_key.dst_port_no = 40001;
+	conn_key.proto = COMM_MGMT_PROTO_UDP;
+	
+	conn = conn_mgmt_create_new_connection(&conn_key);
+	
+	conn_mgmt_start_connection(conn);
+	
+	pthread_exit(0);
+}
 
 

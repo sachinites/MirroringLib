@@ -43,6 +43,7 @@ typedef enum {
 
 #define CONN_MGMT_MAX_CLIENTS_SUPPORTED	8
 #define CONN_MGMT_DEFAULT_KA_INTERVAL   5
+#define CONN_MGMT_KA_PKT_MAX_SIZE	256
 
 typedef struct comm_mgmt_conn_thread_ {
 
@@ -73,6 +74,7 @@ typedef struct conn_mgmt_conn_state_{
     conn_mgmt_conn_key_t conn_key;
     conn_mgmt_mastership_state mastership_state;
     conn_mgmt_conn_status_t conn_status;
+	int sock_fd;
 	uint16_t keep_alive_interval;
 	conn_mgmt_conn_thread_t conn_thread;
 	uint32_t ka_recvd;
