@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include "../libtimer/WheelTimer.h"
 
 typedef enum {
 
@@ -51,8 +52,6 @@ typedef struct comm_mgmt_conn_thread_ {
 
 	pthread_t ka_thread_handle;
 	pthread_cond_t cv;
-	void *(*thread_fn)(void *);
-	void *thread_fn_arg;
 } conn_mgmt_conn_thread_t;
 
 typedef void *(*conn_mgmt_app_notif_fn_ptr)(
@@ -96,6 +95,8 @@ typedef struct conn_mgmt_conn_state_{
     /* List of appln callnacks to be notified */
 	conn_mgmt_app_notif_fn_ptr
         app_notif_cb[CONN_MGMT_MAX_CLIENTS_SUPPORTED];
+    /* KA Expiry timer */
+    wheel_timer_t *wt; /* KA interval + 2 sec */
 } conn_mgmt_conn_state_t;
 
 conn_mgmt_conn_state_t *
@@ -120,3 +121,5 @@ conn_mgmt_resume_sending_kas(
         conn_mgmt_conn_state_t *conn);
 
 #endif /* __CONN_MGMT__  */
+
+

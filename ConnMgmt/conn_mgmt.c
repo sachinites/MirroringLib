@@ -33,8 +33,6 @@ conn_mgmt_init_conn_thread(
 	conn_mgmt_conn_thread_t *conn_thread) {
 
     pthread_cond_init(&conn_thread->cv, 0);
-    conn_thread->thread_fn = 0;
-    conn_thread->thread_fn_arg = 0;
 }
 
 conn_mgmt_conn_state_t *
@@ -253,7 +251,10 @@ conn_mgmt_start_connection(
         printf("Error : socket bind failed\n");
         return;
     }
-    
+
+    conn->wt = init_wheel_timer(60, 1);
+    start_wheel_timer(conn->wt);
+
 	/* Start the thread to recv KA msgs from the other machine */
     conn_mgmt_start_pkt_recvr_thread(conn);
 	
@@ -290,4 +291,5 @@ main(int argc, char **argv) {
 	pthread_exit(0);
     return 0;
 }
+
 
