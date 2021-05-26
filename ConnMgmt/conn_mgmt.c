@@ -42,7 +42,6 @@ conn_mgmt_create_new_connection(
     conn_mgmt_conn_state_t *conn;
 
 	conn = calloc(1, sizeof(conn_mgmt_conn_state_t));	
-
     memcpy(&conn->conn_key, conn_key, sizeof(conn_mgmt_conn_key_t));
     conn->mastership_state = COMM_MGMT_MASTER;
 	conn->keep_alive_interval = CONN_MGMT_DEFAULT_KA_INTERVAL;
@@ -54,6 +53,8 @@ conn_mgmt_create_new_connection(
     conn->pause_sending_kas = false;
     memset(conn->ka_msg.ka_msg, 0, sizeof(conn->ka_msg.ka_msg));
     conn->ka_msg.ka_msg_size = 0;
+    memset(conn->peer_ka_msg.ka_msg, 0, sizeof(conn->peer_ka_msg.ka_msg));
+    conn->peer_ka_msg.ka_msg_size = 0;
 	return conn;
 }
 
@@ -88,6 +89,64 @@ conn_mgmt_set_conn_ka_interval(
     conn_mgmt_resume_sending_kas(conn);
 }
 
+static int
+prepare_ka_pkt (conn_mgmt_conn_state_t *conn,
+				unsigned char *ka_pkt,
+				uint32_t ka_pkt_size) {
+
+    assert(ka_pkt_size >= sizeof(ka_pkt_fmt_t));
+
+    ka_pkt_fmt_t *ka_pkt_fmt = (ka_pkt_fmt_t *)ka_pkt;
+
+    strncpy(ka_pkt_fmt->src_ip_addr, conn->conn_key.src_ip,
+            sizeof(conn->conn_key.src_ip));
+    ka_pkt_fmt->src_port_no = conn->conn_key.src_port_no;
+    strncpy(ka_pkt_fmt->dst_ip_addr, conn->conn_key.dest_ip,
+            sizeof(conn->conn_key.dest_ip));
+    ka_pkt_fmt->dst_port_no = conn->conn_key.dst_port_no;
+    ka_pkt_fmt->mastership_state = conn->mastership_state;
+    ka_pkt_fmt->conn_state = conn->conn_status;
+    memset(ka_pkt_fmt->my_mac, 0xff, sizeof(ka_pkt_fmt->my_mac));
+    memset(ka_pkt_fmt->peer_reported_my_mac, 0xff, 
+           sizeof(ka_pkt_fmt->peer_reported_my_mac));
+    ka_pkt_fmt->hold_time = conn->keep_alive_interval * 1.3;
+    return sizeof(ka_pkt_fmt_t);
+}
+
+static void
+ka_pkt_print(ka_pkt_fmt_t *ka_pkt_fmt) {
+
+    printf("src_ip_addr : %s\n", ka_pkt_fmt->src_ip_addr);
+    printf("src_port_no : %u\n", ka_pkt_fmt->src_port_no);
+    printf("dst_ip_addr : %s\n", ka_pkt_fmt->dst_ip_addr);
+    printf("dst_port_no : %u\n", ka_pkt_fmt->dst_port_no);
+    switch(ka_pkt_fmt->mastership_state) {
+        case COMM_MGMT_MASTER:
+            printf("mastership state : Master\n");
+            break;
+        case COMM_MGMT_BACKUP:
+            printf("mastership state : Backup\n");
+            break;
+        default: ;
+    }
+    switch(ka_pkt_fmt->conn_state){
+        case COMM_MGMT_CONN_DOWN:
+            printf("Conn State : Down\n");
+            break;
+        case COMM_MGMT_CONN_INIT:
+            printf("Conn State : Init\n");
+            break;
+        case COMM_MGMT_CONN_UP:
+            printf("Conn State : Up\n");
+            break;
+        default : ;
+    }
+    printf("my mac : %s\n", ka_pkt_fmt->my_mac);
+    printf("peer reported my mac : %s\n", ka_pkt_fmt->peer_reported_my_mac);
+    printf("hold time : %u\n", ka_pkt_fmt->hold_time);
+}
+
+
 #define MAX_PACKET_BUFFER_SIZE 256
 static unsigned char recv_buffer[MAX_PACKET_BUFFER_SIZE];
 
@@ -97,7 +156,7 @@ pkt_receive( conn_mgmt_conn_state_t *conn,
 			 unsigned char *pkt,
 			 uint32_t pkt_size) {
 
-    printf("%s() Called ....\n", __FUNCTION__);
+    ka_pkt_print((ka_pkt_fmt_t *)pkt);
 }
 
 
@@ -162,13 +221,6 @@ send_udp_msg(char *dest_ip_addr,
             sizeof(struct sockaddr));
 }
 
-static int
-prepare_ka_pkt (conn_mgmt_conn_state_t *conn,
-				unsigned char *ka_pkt,
-				uint32_t ka_pkt_size) {
-
-	return CONN_MGMT_KA_PKT_MAX_SIZE;
-}
 
 static void *
 conn_mgmt_send_ka_pkt(void *arg) {

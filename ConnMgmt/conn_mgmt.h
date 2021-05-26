@@ -89,6 +89,8 @@ typedef struct conn_mgmt_conn_state_{
     bool pause_sending_kas;
     /* KA msg to be sent */
     ka_msg_t ka_msg;
+    /* KA msg recvd from peer */
+    ka_msg_t peer_ka_msg;
     /* Mutex to update the connection;s properties in a
      * thread safe manner */
     pthread_mutex_t conn_mutex;
@@ -119,6 +121,25 @@ conn_mgmt_pause_sending_kas(
 void
 conn_mgmt_resume_sending_kas(
         conn_mgmt_conn_state_t *conn);
+
+/* KA pkt format  */
+
+#pragma pack (push,1)
+
+typedef struct ka_pkt_fmt_ {
+
+    unsigned char src_ip_addr[16];
+    uint32_t src_port_no;
+    unsigned char dst_ip_addr[16];
+    uint32_t dst_port_no;
+    uint8_t  mastership_state;
+    uint8_t conn_state;
+    unsigned char my_mac[8];
+    unsigned char peer_reported_my_mac[8];
+    uint16_t hold_time;
+} ka_pkt_fmt_t;
+
+#pragma pack(pop)
 
 #endif /* __CONN_MGMT__  */
 
