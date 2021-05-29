@@ -28,6 +28,14 @@
 #include <unistd.h>
 #include "conn_mgmt.h"
 
+
+static void
+conn_mgmt_report_connection_state(
+	conn_mgmt_conn_state_t *conn,
+	conn_mgmt_conn_status_t conn_status);
+	
+	
+	
 static void
 conn_mgmt_init_conn_thread(
 	conn_mgmt_conn_thread_t *conn_thread) {
@@ -85,12 +93,13 @@ conn_mgmt_set_conn_ka_interval(
     conn_mgmt_pause_sending_kas(conn);
     pthread_mutex_lock(&conn->conn_mutex);
     conn->keep_alive_interval = ka_interval;
+    conn->hold_time = conn->keep_alive_interval * 2;
     pthread_mutex_unlock(&conn->conn_mutex);
     conn_mgmt_resume_sending_kas(conn);
 }
 
 static int
-prepare_ka_pkt (conn_mgmt_conn_state_t *conn,
+conn_mgmt_update_ka_pkt (conn_mgmt_conn_state_t *conn,
 				unsigned char *ka_pkt,
 				uint32_t ka_pkt_size) {
 
@@ -109,7 +118,7 @@ prepare_ka_pkt (conn_mgmt_conn_state_t *conn,
     memset(ka_pkt_fmt->my_mac, 0xff, sizeof(ka_pkt_fmt->my_mac));
     memset(ka_pkt_fmt->peer_reported_my_mac, 0xff, 
            sizeof(ka_pkt_fmt->peer_reported_my_mac));
-    ka_pkt_fmt->hold_time = conn->keep_alive_interval * 1.3;
+    ka_pkt_fmt->hold_time = conn->keep_alive_interval * 2;
     return sizeof(ka_pkt_fmt_t);
 }
 
@@ -152,6 +161,77 @@ ka_pkt_print(ka_pkt_fmt_t *ka_pkt_fmt) {
 #define MAX_PACKET_BUFFER_SIZE 256
 static unsigned char recv_buffer[MAX_PACKET_BUFFER_SIZE];
 
+static void
+conn_mgmt_report_connection_status_to_clients(
+	conn_mgmt_conn_state_t *conn) {
+
+    printf("%s() called\n", __FUNCTION__);
+}
+
+static void
+conn_mgmt_tear_conn_down (void *arg, unsigned int arg_size) {
+
+    printf("%s() called\n", __FUNCTION__);
+
+	conn_mgmt_conn_state_t *conn = (conn_mgmt_conn_state_t *)arg;
+    timer_de_register_app_event(conn->conn_hold_timer);
+    conn->conn_hold_timer = NULL;
+    conn->conn_status = COMM_MGMT_CONN_DOWN;
+    conn_mgmt_update_ka_pkt(conn, 
+                       conn->ka_msg.ka_msg,
+                       sizeof(conn->ka_msg.ka_msg));
+    conn_mgmt_report_connection_status_to_clients(conn);
+}
+
+static void
+conn_mgmt_refresh_conn_expiration_timer(
+	conn_mgmt_conn_state_t *conn) {
+
+	if (!conn->conn_hold_timer) {
+		conn->conn_hold_timer = timer_register_app_event(
+                                conn->wt,
+								conn_mgmt_tear_conn_down,
+								(void *)conn, sizeof(conn),
+								conn->hold_time * 1000,
+								0); 
+		return;				
+	}
+	
+	wt_elem_reschedule(conn->conn_hold_timer,
+                       conn->hold_time * 1000);
+}
+
+static void
+conn_mgmt_update_conn_state(conn_mgmt_conn_state_t *conn) {
+
+	bool conn_state_changed = false;
+	
+	switch(conn->conn_status) {
+	
+		case COMM_MGMT_CONN_DOWN:
+			conn->conn_status = COMM_MGMT_CONN_INIT;
+			conn_state_changed = true;
+			break;
+			
+    	case COMM_MGMT_CONN_INIT:
+    		conn->conn_status = COMM_MGMT_CONN_UP;
+    		conn_mgmt_refresh_conn_expiration_timer(conn);
+    		conn_state_changed = true;
+    		break;
+    		
+		case COMM_MGMT_CONN_UP:
+			conn_mgmt_refresh_conn_expiration_timer(conn);
+			break;
+		default: ;
+	}
+	
+	if (conn_state_changed) {
+        conn_mgmt_update_ka_pkt(conn, 
+                       conn->ka_msg.ka_msg,
+                       sizeof(conn->ka_msg.ka_msg));
+		conn_mgmt_report_connection_status_to_clients(conn);
+	}
+}
 
 static void
 pkt_receive( conn_mgmt_conn_state_t *conn,
@@ -159,8 +239,19 @@ pkt_receive( conn_mgmt_conn_state_t *conn,
 			 uint32_t pkt_size) {
 
     static uint32_t i = 1;
-    printf("pkt recvd # %u\n", i++);
+    
+    printf("pkt recvd # %u\n\n", i++);
+    
+    assert(pkt_size <= CONN_MGMT_KA_PKT_MAX_SIZE);
+    
     ka_pkt_print((ka_pkt_fmt_t *)pkt);
+    
+    if (conn->peer_ka_msg.ka_msg_size != pkt_size ||
+    	 memcmp(conn->peer_ka_msg.ka_msg, pkt, pkt_size)) {
+    	
+    	memcpy(conn->peer_ka_msg.ka_msg, pkt, pkt_size);
+    	conn_mgmt_update_conn_state(conn);
+    }
 }
 
 
@@ -233,12 +324,15 @@ conn_mgmt_send_ka_pkt(void *arg) {
 		(conn_mgmt_conn_state_t *)arg;
 
 	conn->ka_msg.ka_msg_size = 
-        prepare_ka_pkt(conn, 
+        conn_mgmt_update_ka_pkt(conn, 
                        conn->ka_msg.ka_msg,
                        sizeof(conn->ka_msg.ka_msg));
 
 	while(1) {
-	
+
+        printf("KA Sent : \n\n");
+        ka_pkt_print((ka_pkt_fmt_t *)(conn->ka_msg.ka_msg));
+
 		send_udp_msg (conn->conn_key.dest_ip,
 					  conn->conn_key.dst_port_no,
 					  conn->ka_msg.ka_msg,
@@ -308,7 +402,7 @@ conn_mgmt_start_connection(
         return;
     }
 
-    conn->wt = init_wheel_timer(60, 1);
+    conn->wt = init_wheel_timer(60, 1, TIMER_SECONDS);
     start_wheel_timer(conn->wt);
 
 	/* Start the thread to recv KA msgs from the other machine */
@@ -347,6 +441,15 @@ main(int argc, char **argv) {
     scanf("\n");
 	pthread_exit(0);
     return 0;
+}
+
+
+static void
+conn_mgmt_report_connection_state(
+	conn_mgmt_conn_state_t *conn,
+	conn_mgmt_conn_status_t conn_status) {
+
+	printf("connection status reported : %u\n", conn_status);
 }
 
 

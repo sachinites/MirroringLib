@@ -79,6 +79,8 @@ typedef struct conn_mgmt_conn_state_{
 	int sock_fd;
     /* Time interval in sec to send out KA msgs */
 	uint16_t keep_alive_interval;
+	/* Time interval to report the connection down*/
+	uint32_t hold_time;
     /* Connection thread, to send out KA msgs */
 	conn_mgmt_conn_thread_t conn_thread;
     /* Some statistics to keep track */
@@ -98,7 +100,8 @@ typedef struct conn_mgmt_conn_state_{
 	conn_mgmt_app_notif_fn_ptr
         app_notif_cb[CONN_MGMT_MAX_CLIENTS_SUPPORTED];
     /* KA Expiry timer */
-    wheel_timer_t *wt; /* KA interval + 2 sec */
+    wheel_timer_t *wt; /* Timer instance */
+    wheel_timer_elem_t *conn_hold_timer;
 } conn_mgmt_conn_state_t;
 
 conn_mgmt_conn_state_t *

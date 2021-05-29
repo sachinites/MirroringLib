@@ -1,6 +1,6 @@
 #include <stdio.h>
-#include <string.h>
 #include "WheelTimer.h"
+#include <string.h>
 
 #define WHEEL_SIZE 10
 #define WHEEL_TIMER_CLOCK_TIC_INTERVAL 1
@@ -19,7 +19,7 @@ print_hello(char *S){
  * with wheel timer and invoked by wheel timer. We will unwrap the argument and invoke the actual 
  * appln routine with correct arguments. This technique is called 'Masking of routines'*/
 
-void wrapper_print_hello(void *arg, int arg_size){
+void wrapper_print_hello(void *arg, unsigned int arg_size){
     char *S = (char *)arg;
     print_hello(S);
 }
@@ -28,26 +28,30 @@ int
 main(int argc, char **argv){
 
     /*create a wheel timer object*/
-    wheel_timer_t *wt = init_wheel_timer(WHEEL_SIZE, WHEEL_TIMER_CLOCK_TIC_INTERVAL);
+    wheel_timer_t *wt = init_wheel_timer(WHEEL_SIZE,
+						10,
+						TIMER_MILLI_SECONDS);
     /*start the wheel timer thread*/
     start_wheel_timer(wt);
 
     /*Now Wheel timer has started running in a separte thread. 
      * Register the events to be triggered with Wheel timer now.*/
+	static char *MyString = "MyString";
+	static char *csepracticals = "csepracticals";
 
     wheel_timer_elem_t * wt_elem = 
-        register_app_event(wt, wrapper_print_hello, "MyString", 
+        timer_register_app_event(wt, wrapper_print_hello, MyString,
                            strlen("MyString"), 
-                           5,  /*wrapper_print_hello fn will be called after every 5 seconds*/
+                           100,  /*wrapper_print_hello fn will be called after every 5 seconds*/
                            1); /*1 indefinitely, 0 only once : call for wrapper_print_hello*/
 
     wt_elem = 
-        register_app_event(wt, wrapper_print_hello, "www.csepracticals.com", 
-                           strlen("www.csepracticals.com"), 
-                           3,  /*wrapper_print_hello fn will be called after every 5 seconds*/
+        timer_register_app_event(wt, wrapper_print_hello, csepracticals, 
+                           strlen("csepracticals"), 
+                           500,  /*wrapper_print_hello fn will be called after every 5 seconds*/
                            1); /*1 indefinitely, 0 only once : call for wrapper_print_hello*/
     /*stop the main program from gettin terminated, otherwise wheel timer
      * thread we created will also get terminated*/
-    scanf("\n");
+    pause();
     return 0;
 }
