@@ -116,10 +116,11 @@ prepare_ka_pkt (conn_mgmt_conn_state_t *conn,
 static void
 ka_pkt_print(ka_pkt_fmt_t *ka_pkt_fmt) {
 
-    printf("src_ip_addr : %s\n", ka_pkt_fmt->src_ip_addr);
-    printf("src_port_no : %u\n", ka_pkt_fmt->src_port_no);
-    printf("dst_ip_addr : %s\n", ka_pkt_fmt->dst_ip_addr);
-    printf("dst_port_no : %u\n", ka_pkt_fmt->dst_port_no);
+    printf("Src ip and Port No : %s %u\n",
+            ka_pkt_fmt->src_ip_addr, ka_pkt_fmt->src_port_no);
+    printf("dst ip and Port No : %s %u\n",
+            ka_pkt_fmt->dst_ip_addr, ka_pkt_fmt->dst_port_no);
+    
     switch(ka_pkt_fmt->mastership_state) {
         case COMM_MGMT_MASTER:
             printf("mastership state : Master\n");
@@ -142,7 +143,8 @@ ka_pkt_print(ka_pkt_fmt_t *ka_pkt_fmt) {
         default : ;
     }
     printf("my mac : %s\n", ka_pkt_fmt->my_mac);
-    printf("peer reported my mac : %s\n", ka_pkt_fmt->peer_reported_my_mac);
+    printf("peer reported my mac : %s\n",
+            ka_pkt_fmt->peer_reported_my_mac);
     printf("hold time : %u\n", ka_pkt_fmt->hold_time);
 }
 
@@ -156,6 +158,8 @@ pkt_receive( conn_mgmt_conn_state_t *conn,
 			 unsigned char *pkt,
 			 uint32_t pkt_size) {
 
+    static uint32_t i = 1;
+    printf("pkt recvd # %u\n", i++);
     ka_pkt_print((ka_pkt_fmt_t *)pkt);
 }
 
@@ -339,7 +343,8 @@ main(int argc, char **argv) {
     conn_mgmt_set_conn_ka_interval(conn, 2);
     /* Start send KA msgs, and get ready to recv msgs */
 	conn_mgmt_start_connection(conn);
-	
+
+    scanf("\n");
 	pthread_exit(0);
     return 0;
 }
