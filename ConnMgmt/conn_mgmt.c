@@ -458,7 +458,7 @@ conn_mgmt_start_connection(
     conn_mgmt_start_ka_sending_thread(conn);
 }
 
-
+#if 0
 int
 main(int argc, char **argv) {
 
@@ -496,7 +496,7 @@ main(int argc, char **argv) {
 	pthread_exit(0);
     return 0;
 }
-
+#endif
 
 static void
 conn_mgmt_report_connection_state(
