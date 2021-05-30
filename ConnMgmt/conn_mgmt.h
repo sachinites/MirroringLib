@@ -30,6 +30,21 @@ typedef enum {
 	COMM_MGMT_CONN_UP
 } conn_mgmt_conn_status_t;
 
+static inline conn_mgmt_conn_status_t
+conn_mgmt_get_next_conn_state(conn_mgmt_conn_status_t curr_state) {
+
+    switch(curr_state) {
+        case COMM_MGMT_CONN_DOWN:
+            return COMM_MGMT_CONN_INIT;
+        case COMM_MGMT_CONN_INIT:
+            return COMM_MGMT_CONN_UP;
+        case COMM_MGMT_CONN_UP:
+                return COMM_MGMT_CONN_UP;
+        default: ;
+    }
+    return COMM_MGMT_CONN_UP;
+}
+
 typedef enum {
 
     COMM_MGMT_MASTER,
@@ -106,7 +121,8 @@ typedef struct conn_mgmt_conn_state_{
 
 conn_mgmt_conn_state_t *
 conn_mgmt_create_new_connection(
-    conn_mgmt_conn_key_t *conn_key);
+    conn_mgmt_conn_key_t *conn_key,
+    unsigned char *mastership);
 
 void
 conn_mgmt_start_connection(

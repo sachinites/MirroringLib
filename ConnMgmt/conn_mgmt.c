@@ -33,7 +33,11 @@ static void
 conn_mgmt_report_connection_state(
 	conn_mgmt_conn_state_t *conn,
 	conn_mgmt_conn_status_t conn_status);
-	
+
+static void
+conn_mgmt_update_conn_state(
+                conn_mgmt_conn_state_t *conn,
+                conn_mgmt_conn_status_t new_state);
 	
 	
 static void
@@ -45,13 +49,15 @@ conn_mgmt_init_conn_thread(
 
 conn_mgmt_conn_state_t *
 conn_mgmt_create_new_connection(
-    conn_mgmt_conn_key_t *conn_key) {
+    conn_mgmt_conn_key_t *conn_key, unsigned char *mastership) {
 
     conn_mgmt_conn_state_t *conn;
 
 	conn = calloc(1, sizeof(conn_mgmt_conn_state_t));	
     memcpy(&conn->conn_key, conn_key, sizeof(conn_mgmt_conn_key_t));
-    conn->mastership_state = COMM_MGMT_MASTER;
+    conn->mastership_state = strncmp(mastership, "master", strlen("master")) == 0 ?
+                             COMM_MGMT_MASTER :
+                             COMM_MGMT_BACKUP;
 	conn->keep_alive_interval = CONN_MGMT_DEFAULT_KA_INTERVAL;
 	conn_mgmt_init_conn_thread(&conn->conn_thread);
 	conn->ka_recvd = 0;
@@ -169,6 +175,38 @@ conn_mgmt_report_connection_status_to_clients(
 }
 
 static void
+conn_mgmt_report_pre_switchover_to_clients(
+        conn_mgmt_conn_state_t *conn) {
+
+    printf("%s() called\n", __FUNCTION__);
+
+}
+
+static void
+conn_mgmt_report_post_switchover_to_clients(
+        conn_mgmt_conn_state_t *conn) {
+
+    printf("%s() called\n", __FUNCTION__);
+}
+
+static void
+conn_mgmt_switchover(conn_mgmt_conn_state_t *conn) {
+
+
+    if (conn->mastership_state == COMM_MGMT_BACKUP){
+        
+        conn_mgmt_report_pre_switchover_to_clients(conn);
+
+        conn->mastership_state = COMM_MGMT_MASTER;
+    
+        conn_mgmt_update_ka_pkt(conn, 
+                       conn->ka_msg.ka_msg,
+                       sizeof(conn->ka_msg.ka_msg));
+        conn_mgmt_report_post_switchover_to_clients(conn);
+    }
+}
+
+static void
 conn_mgmt_tear_conn_down (void *arg, unsigned int arg_size) {
 
     printf("%s() called\n", __FUNCTION__);
@@ -176,11 +214,13 @@ conn_mgmt_tear_conn_down (void *arg, unsigned int arg_size) {
 	conn_mgmt_conn_state_t *conn = (conn_mgmt_conn_state_t *)arg;
     timer_de_register_app_event(conn->conn_hold_timer);
     conn->conn_hold_timer = NULL;
-    conn->conn_status = COMM_MGMT_CONN_DOWN;
+    conn_mgmt_update_conn_state(conn,
+            COMM_MGMT_CONN_DOWN);
     conn_mgmt_update_ka_pkt(conn, 
                        conn->ka_msg.ka_msg,
                        sizeof(conn->ka_msg.ka_msg));
     conn_mgmt_report_connection_status_to_clients(conn);
+    conn_mgmt_switchover(conn);
 }
 
 static void
@@ -202,24 +242,29 @@ conn_mgmt_refresh_conn_expiration_timer(
 }
 
 static void
-conn_mgmt_update_conn_state(conn_mgmt_conn_state_t *conn) {
+conn_mgmt_update_conn_state(
+        conn_mgmt_conn_state_t *conn,
+        conn_mgmt_conn_status_t new_state) {
 
 	bool conn_state_changed = false;
 	
 	switch(conn->conn_status) {
 	
 		case COMM_MGMT_CONN_DOWN:
+            assert(new_state == COMM_MGMT_CONN_INIT);
 			conn->conn_status = COMM_MGMT_CONN_INIT;
 			conn_state_changed = true;
 			break;
 			
     	case COMM_MGMT_CONN_INIT:
+            assert(new_state == COMM_MGMT_CONN_UP);
     		conn->conn_status = COMM_MGMT_CONN_UP;
     		conn_mgmt_refresh_conn_expiration_timer(conn);
     		conn_state_changed = true;
     		break;
     		
 		case COMM_MGMT_CONN_UP:
+            conn->conn_status = new_state;
 			conn_mgmt_refresh_conn_expiration_timer(conn);
 			break;
 		default: ;
@@ -240,7 +285,7 @@ pkt_receive( conn_mgmt_conn_state_t *conn,
 
     static uint32_t i = 1;
     
-    printf("pkt recvd # %u\n\n", i++);
+    printf("\npkt recvd # %u\n\n", i++);
     
     assert(pkt_size <= CONN_MGMT_KA_PKT_MAX_SIZE);
     
@@ -250,7 +295,8 @@ pkt_receive( conn_mgmt_conn_state_t *conn,
     	 memcmp(conn->peer_ka_msg.ka_msg, pkt, pkt_size)) {
     	
     	memcpy(conn->peer_ka_msg.ka_msg, pkt, pkt_size);
-    	conn_mgmt_update_conn_state(conn);
+    	conn_mgmt_update_conn_state(conn,
+                conn_mgmt_get_next_conn_state(conn->conn_status));
     }
 }
 
@@ -330,7 +376,7 @@ conn_mgmt_send_ka_pkt(void *arg) {
 
 	while(1) {
 
-        printf("KA Sent : \n\n");
+        printf("\nKA Sent : \n\n");
         ka_pkt_print((ka_pkt_fmt_t *)(conn->ka_msg.ka_msg));
 
 		send_udp_msg (conn->conn_key.dest_ip,
@@ -419,10 +465,18 @@ main(int argc, char **argv) {
 	conn_mgmt_conn_state_t *conn;
 	conn_mgmt_conn_key_t conn_key;
 
-    if (argc != 5) {
+    if (argc != 6) {
 
         printf("Usage : ./<executable> <src ip> <src port no> "
-                "<dst ip> <dst port no>\n");
+                "<dst ip> <dst port no> <master|backup>\n");
+        return 0;
+    }
+
+    if (strncmp(argv[5], "master", strlen("master")) &&
+        strncmp(argv[5], "backup", strlen("backup"))) {
+
+        printf("Usage : ./<executable> <src ip> <src port no> "
+                "<dst ip> <dst port no> <master|backup>\n");
         return 0;
     }
 
@@ -432,7 +486,7 @@ main(int argc, char **argv) {
 	conn_key.dst_port_no = atoi(argv[4]);
 
     /* Create a new connection Object */
-	conn = conn_mgmt_create_new_connection(&conn_key);
+	conn = conn_mgmt_create_new_connection(&conn_key, argv[5]);
     /* Set KA interval, if not set, default shall be used */
     conn_mgmt_set_conn_ka_interval(conn, 2);
     /* Start send KA msgs, and get ready to recv msgs */
