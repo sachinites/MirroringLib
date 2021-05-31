@@ -28,6 +28,17 @@
 #include <unistd.h>
 #include "conn_mgmt.h"
 
+static glthread_t connection_db;
+static wheel_timer_t *global_timer;
+
+void conn_mgmt_init() {
+
+	init_glthread(&connection_db);
+	global_timer = init_wheel_timer(60, 1, TIMER_SECONDS);
+	start_wheel_timer(global_timer);
+}
+
+
 
 static void
 conn_mgmt_report_connection_state(
@@ -69,6 +80,7 @@ conn_mgmt_create_new_connection(
     conn->ka_msg.ka_msg_size = 0;
     memset(conn->peer_ka_msg.ka_msg, 0, sizeof(conn->peer_ka_msg.ka_msg));
     conn->peer_ka_msg.ka_msg_size = 0;
+    init_glthread(&conn->glue);
 	return conn;
 }
 
@@ -131,36 +143,36 @@ conn_mgmt_update_ka_pkt (conn_mgmt_conn_state_t *conn,
 static void
 ka_pkt_print(ka_pkt_fmt_t *ka_pkt_fmt) {
 
-    printf("Src ip and Port No : %s %u\n",
+    printf("\t\tSrc ip and Port No : %s %u\n",
             ka_pkt_fmt->src_ip_addr, ka_pkt_fmt->src_port_no);
-    printf("dst ip and Port No : %s %u\n",
+    printf("\t\tdst ip and Port No : %s %u\n",
             ka_pkt_fmt->dst_ip_addr, ka_pkt_fmt->dst_port_no);
     
     switch(ka_pkt_fmt->mastership_state) {
         case COMM_MGMT_MASTER:
-            printf("mastership state : Master\n");
+            printf("\t\tmastership state : Master\n");
             break;
         case COMM_MGMT_BACKUP:
-            printf("mastership state : Backup\n");
+            printf("\t\tmastership state : Backup\n");
             break;
         default: ;
     }
     switch(ka_pkt_fmt->conn_state){
         case COMM_MGMT_CONN_DOWN:
-            printf("Conn State : Down\n");
+            printf("\t\tConn State : Down\n");
             break;
         case COMM_MGMT_CONN_INIT:
-            printf("Conn State : Init\n");
+            printf("\t\tConn State : Init\n");
             break;
         case COMM_MGMT_CONN_UP:
-            printf("Conn State : Up\n");
+            printf("\t\tConn State : Up\n");
             break;
         default : ;
     }
-    printf("my mac : %s\n", ka_pkt_fmt->my_mac);
-    printf("peer reported my mac : %s\n",
+    printf("\t\tmy mac : %s\n", ka_pkt_fmt->my_mac);
+    printf("\t\tpeer reported my mac : %s\n",
             ka_pkt_fmt->peer_reported_my_mac);
-    printf("hold time : %u\n", ka_pkt_fmt->hold_time);
+    printf("\t\thold time : %u\n", ka_pkt_fmt->hold_time);
 }
 
 
@@ -171,14 +183,14 @@ static void
 conn_mgmt_report_connection_status_to_clients(
 	conn_mgmt_conn_state_t *conn) {
 
-    printf("%s() called\n", __FUNCTION__);
+    
 }
 
 static void
 conn_mgmt_report_pre_switchover_to_clients(
         conn_mgmt_conn_state_t *conn) {
 
-    printf("%s() called\n", __FUNCTION__);
+    
 
 }
 
@@ -186,7 +198,7 @@ static void
 conn_mgmt_report_post_switchover_to_clients(
         conn_mgmt_conn_state_t *conn) {
 
-    printf("%s() called\n", __FUNCTION__);
+    
 }
 
 static void
@@ -208,8 +220,6 @@ conn_mgmt_switchover(conn_mgmt_conn_state_t *conn) {
 
 static void
 conn_mgmt_tear_conn_down (void *arg, unsigned int arg_size) {
-
-    printf("%s() called\n", __FUNCTION__);
 
 	conn_mgmt_conn_state_t *conn = (conn_mgmt_conn_state_t *)arg;
     timer_de_register_app_event(conn->conn_hold_timer);
@@ -251,13 +261,11 @@ conn_mgmt_update_conn_state(
 	switch(conn->conn_status) {
 	
 		case COMM_MGMT_CONN_DOWN:
-            assert(new_state == COMM_MGMT_CONN_INIT);
 			conn->conn_status = COMM_MGMT_CONN_INIT;
 			conn_state_changed = true;
 			break;
 			
     	case COMM_MGMT_CONN_INIT:
-            assert(new_state == COMM_MGMT_CONN_UP);
     		conn->conn_status = COMM_MGMT_CONN_UP;
     		conn_mgmt_refresh_conn_expiration_timer(conn);
     		conn_state_changed = true;
@@ -282,14 +290,9 @@ static void
 pkt_receive( conn_mgmt_conn_state_t *conn,
 			 unsigned char *pkt,
 			 uint32_t pkt_size) {
-
-    static uint32_t i = 1;
-    
-    printf("\npkt recvd # %u\n\n", i++);
-    
+  
     assert(pkt_size <= CONN_MGMT_KA_PKT_MAX_SIZE);
-    
-    ka_pkt_print((ka_pkt_fmt_t *)pkt);
+    conn->ka_recvd++;
     
     if (conn->peer_ka_msg.ka_msg_size != pkt_size ||
     	 memcmp(conn->peer_ka_msg.ka_msg, pkt, pkt_size)) {
@@ -376,10 +379,7 @@ conn_mgmt_send_ka_pkt(void *arg) {
 
 	while(1) {
 
-        printf("\nKA Sent : \n\n");
-        ka_pkt_print((ka_pkt_fmt_t *)(conn->ka_msg.ka_msg));
-
-		send_udp_msg (conn->conn_key.dest_ip,
+        send_udp_msg (conn->conn_key.dest_ip,
 					  conn->conn_key.dst_port_no,
 					  conn->ka_msg.ka_msg,
                       conn->ka_msg.ka_msg_size,
@@ -387,8 +387,7 @@ conn_mgmt_send_ka_pkt(void *arg) {
 					  
 		conn->ka_sent++;
 		sleep(conn->keep_alive_interval);
-		printf("%s() called ....\n", __FUNCTION__);
-
+		
         pthread_mutex_lock(&conn->conn_mutex);
 
         while (conn->pause_sending_kas) {
@@ -448,8 +447,7 @@ conn_mgmt_start_connection(
         return;
     }
 
-    conn->wt = init_wheel_timer(60, 1, TIMER_SECONDS);
-    start_wheel_timer(conn->wt);
+    conn->wt = global_timer;
 
 	/* Start the thread to recv KA msgs from the other machine */
     conn_mgmt_start_pkt_recvr_thread(conn);
@@ -458,46 +456,6 @@ conn_mgmt_start_connection(
     conn_mgmt_start_ka_sending_thread(conn);
 }
 
-#if 0
-int
-main(int argc, char **argv) {
-
-	conn_mgmt_conn_state_t *conn;
-	conn_mgmt_conn_key_t conn_key;
-
-    if (argc != 6) {
-
-        printf("Usage : ./<executable> <src ip> <src port no> "
-                "<dst ip> <dst port no> <master|backup>\n");
-        return 0;
-    }
-
-    if (strncmp(argv[5], "master", strlen("master")) &&
-        strncmp(argv[5], "backup", strlen("backup"))) {
-
-        printf("Usage : ./<executable> <src ip> <src port no> "
-                "<dst ip> <dst port no> <master|backup>\n");
-        return 0;
-    }
-
-	strncpy((char *)&conn_key.src_ip,  argv[1], 16);
-	conn_key.src_port_no = atoi(argv[2]);
-	strncpy((char *)&conn_key.dest_ip, argv[3], 16);
-	conn_key.dst_port_no = atoi(argv[4]);
-
-    /* Create a new connection Object */
-	conn = conn_mgmt_create_new_connection(&conn_key, argv[5]);
-    /* Set KA interval, if not set, default shall be used */
-    conn_mgmt_set_conn_ka_interval(conn, 2);
-    /* Start send KA msgs, and get ready to recv msgs */
-	conn_mgmt_start_connection(conn);
-
-    scanf("\n");
-	pthread_exit(0);
-    return 0;
-}
-#endif
-
 static void
 conn_mgmt_report_connection_state(
 	conn_mgmt_conn_state_t *conn,
@@ -505,5 +463,132 @@ conn_mgmt_report_connection_state(
 
 	printf("connection status reported : %u\n", conn_status);
 }
+
+/* mgmt APIs */
+
+conn_mgmt_conn_state_t *
+conn_mgmt_lookup_connection_by_name(char *conn_name) {
+	
+	return NULL;
+}
+
+conn_mgmt_conn_state_t *
+conn_mgmt_lookup_connection_by_key(conn_mgmt_conn_key_t *conn_key) {
+	
+	return NULL;
+}
+
+/* backend handlers */
+void
+conn_mgmt_configure_connection(char *conn_name,
+							   char *src_ip,
+							   uint16_t src_port_no,
+    						   char *dst_ip,
+    						   uint16_t dst_port_no,
+    						   char *mastership) {
+    						   
+   conn_mgmt_conn_state_t *conn;
+   conn_mgmt_conn_key_t conn_key;
+   
+   conn = conn_mgmt_lookup_connection_by_name(conn_name);
+   
+   if (conn) {
+ 		printf("connection %s already exists\n", conn_name);
+ 		return;  
+   }
+   
+   strncpy((char *)&conn_key.src_ip,  src_ip, 16);
+   conn_key.src_port_no = src_port_no;
+   strncpy((char *)&conn_key.dest_ip, dst_ip, 16);
+   conn_key.dst_port_no = dst_port_no;
+ 
+   conn = conn_mgmt_lookup_connection_by_key(&conn_key);
+   
+   if (conn) {
+ 		printf("connection %s with these keys already exists\n", conn->conn_name);
+ 		return;    
+   }
+   
+   /* Create a new connection Object */
+	conn = conn_mgmt_create_new_connection(&conn_key, mastership);
+	strncpy(conn->conn_name, conn_name, sizeof(conn->conn_name));
+    /* Set KA interval, if not set, default shall be used */
+    conn_mgmt_set_conn_ka_interval(conn, 2);
+    /* Start send KA msgs, and get ready to recv msgs */
+	conn_mgmt_start_connection(conn);
+
+	glthread_add_next(&connection_db, &conn->glue);
+}
+
+static void
+conn_mgmt_print_connection_details(conn_mgmt_conn_state_t *conn) {
+
+	printf("conn name : %s\n", conn->conn_name);
+	printf("\tconn key : src : %s %u\n", conn->conn_key.src_ip, conn->conn_key.src_port_no);
+	printf("\tconn key : dst : %s %u\n", conn->conn_key.dest_ip, conn->conn_key.dst_port_no);
+	printf("\tmastership status : %s\n", conn->mastership_state == COMM_MGMT_MASTER ? "master" : "backup");
+	switch(conn->conn_status) {
+	
+		case COMM_MGMT_CONN_DOWN:
+			printf("\tconnection state : Down\n");
+			break;
+    	case COMM_MGMT_CONN_INIT:
+    		printf("\tconnection state : Init\n");
+			break;
+		case COMM_MGMT_CONN_UP:
+		printf("\tconnection state : UP\n");
+			break;
+		default : ;
+	}
+	
+	printf("\tKA Interval : %u  hold time : %u\n",
+		conn->keep_alive_interval, conn->hold_time);
+		
+	printf("\tKA recvd :%u   KA sent :%u   Down Count :%u\n",
+		conn->ka_recvd, conn->ka_sent, conn->down_count);
+		
+	printf("\tKA sending paused : %s\n", conn->pause_sending_kas ? "true" : "false");
+	printf("\thold time remaining : %u msec\n", 
+		conn->conn_hold_timer ? wt_get_remaining_time(conn->conn_hold_timer) :
+        0);
+		
+	printf("\t Local KA msg : \n");
+	ka_pkt_print(conn->ka_msg.ka_msg);
+	
+	printf("\n\t Peer KA msg \n");
+	ka_pkt_print(conn->peer_ka_msg.ka_msg);
+		
+	printf("*** connection details end *****\n");
+	
+}
+
+
+
+void
+conn_mgmt_show_connections(char *conn_name) {
+
+
+	glthread_t *curr;
+	conn_mgmt_conn_state_t *conn;
+	
+	ITERATE_GLTHREAD_BEGIN(&connection_db, curr) {
+	
+		conn = glthread_glue_to_connection(curr);
+		
+		if (conn_name ) {
+		
+			if (strncmp(conn_name, conn->conn_name, sizeof(conn->conn_name)) == 0) {
+				conn_mgmt_print_connection_details(conn);
+				return;
+			}
+			else continue;
+		}
+		
+		conn_mgmt_print_connection_details(conn);
+		
+	} ITERATE_GLTHREAD_END(&connection_db, curr);
+}
+
+
 
 

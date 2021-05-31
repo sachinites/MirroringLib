@@ -83,6 +83,7 @@ typedef struct ka_msg_ {
 
 typedef struct conn_mgmt_conn_state_{
 
+	unsigned char conn_name[64];
     /* Key of the connection, key is :
      * src ip, src port, dst ip, dst port, proto*/
     conn_mgmt_conn_key_t conn_key;
@@ -117,7 +118,13 @@ typedef struct conn_mgmt_conn_state_{
     /* KA Expiry timer */
     wheel_timer_t *wt; /* Timer instance */
     wheel_timer_elem_t *conn_hold_timer;
+    /* Glue to the linked list */
+    glthread_t glue;
 } conn_mgmt_conn_state_t;
+
+GLTHREAD_TO_STRUCT(glthread_glue_to_connection,
+				   conn_mgmt_conn_state_t, glue);
+
 
 conn_mgmt_conn_state_t *
 conn_mgmt_create_new_connection(
@@ -141,6 +148,24 @@ void
 conn_mgmt_resume_sending_kas(
         conn_mgmt_conn_state_t *conn);
 
+
+void
+conn_mgmt_configure_connection(char *conn_name,
+							   char *src_ip,
+							   uint16_t src_port_no,
+    						   char *dst_ip,
+    						   uint16_t dst_port_no,
+    						   char *mastership);
+
+conn_mgmt_conn_state_t *
+conn_mgmt_lookup_connection_by_name(char *conn_name);
+
+conn_mgmt_conn_state_t *
+conn_mgmt_lookup_connection_by_key(conn_mgmt_conn_key_t *conn_key);
+
+void
+conn_mgmt_show_connections(char *conn_name);
+    						   
 /* KA pkt format  */
 
 #pragma pack (push,1)
