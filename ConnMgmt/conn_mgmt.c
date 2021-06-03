@@ -526,20 +526,8 @@ conn_mgmt_print_connection_details(conn_mgmt_conn_state_t *conn) {
 	printf("conn name : %s\n", conn->conn_name);
 	printf("\tconn key : src : %s %u\n", conn->conn_key.src_ip, conn->conn_key.src_port_no);
 	printf("\tconn key : dst : %s %u\n", conn->conn_key.dest_ip, conn->conn_key.dst_port_no);
-	printf("\tmastership status : %s\n", conn->mastership_state == COMM_MGMT_MASTER ? "master" : "backup");
-	switch(conn->conn_status) {
-	
-		case COMM_MGMT_CONN_DOWN:
-			printf("\tconnection state : Down\n");
-			break;
-    	case COMM_MGMT_CONN_INIT:
-    		printf("\tconnection state : Init\n");
-			break;
-		case COMM_MGMT_CONN_UP:
-		printf("\tconnection state : UP\n");
-			break;
-		default : ;
-	}
+	printf("\tmastership status : %s\n", conn_mgmt_get_conn_mastership_state_str(conn->mastership_state));
+	printf("\tconnection state : %s\n", conn_mgmt_get_conn_state_name_str(conn->conn_status));
 	
 	printf("\tKA Interval : %u  hold time : %u\n",
 		conn->keep_alive_interval, conn->hold_time);
@@ -562,11 +550,8 @@ conn_mgmt_print_connection_details(conn_mgmt_conn_state_t *conn) {
 	
 }
 
-
-
-void
-conn_mgmt_show_connections(char *conn_name) {
-
+static void
+conn_mgmt_print_all_connection_brief() {
 
 	glthread_t *curr;
 	conn_mgmt_conn_state_t *conn;
@@ -575,16 +560,37 @@ conn_mgmt_show_connections(char *conn_name) {
 	
 		conn = glthread_glue_to_connection(curr);
 		
-		if (conn_name ) {
+		printf("%s   %s:%u    %s:%u     KAsent:%u   KArecvd:%u    state:%s      mastership:%s\n",
+			conn->conn_name, conn->conn_key.src_ip, conn->conn_key.src_port_no, 
+			conn->conn_key.dest_ip, conn->conn_key.dst_port_no,
+			conn->ka_sent, conn->ka_recvd,
+			conn_mgmt_get_conn_state_name_str(conn->conn_status),
+			conn_mgmt_get_conn_mastership_state_str(conn->mastership_state));
 		
-			if (strncmp(conn_name, conn->conn_name, sizeof(conn->conn_name)) == 0) {
-				conn_mgmt_print_connection_details(conn);
-				return;
-			}
-			else continue;
+	} ITERATE_GLTHREAD_END(&connection_db, curr);
+}
+
+void
+conn_mgmt_show_connections(char *conn_name) {
+
+
+	glthread_t *curr;
+	conn_mgmt_conn_state_t *conn;
+	
+	if (!conn_name) {
+	
+		conn_mgmt_print_all_connection_brief();
+		return;
+	}
+	
+	ITERATE_GLTHREAD_BEGIN(&connection_db, curr) {
+	
+		conn = glthread_glue_to_connection(curr);
+		
+		if (strncmp(conn_name, conn->conn_name, sizeof(conn->conn_name)) == 0) {
+			conn_mgmt_print_connection_details(conn);
+			return;
 		}
-		
-		conn_mgmt_print_connection_details(conn);
 		
 	} ITERATE_GLTHREAD_END(&connection_db, curr);
 }

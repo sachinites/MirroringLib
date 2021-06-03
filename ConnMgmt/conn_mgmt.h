@@ -45,11 +45,43 @@ conn_mgmt_get_next_conn_state(conn_mgmt_conn_status_t curr_state) {
     return COMM_MGMT_CONN_UP;
 }
 
+static inline unsigned char *
+conn_mgmt_get_conn_state_name_str(conn_mgmt_conn_status_t curr_state) {
+
+    switch(curr_state){
+        case COMM_MGMT_CONN_DOWN:
+            return "DOWN";
+        case COMM_MGMT_CONN_INIT:
+            return "INIT";
+        case COMM_MGMT_CONN_UP:
+        	return "UP";
+        default: ;
+     
+    }
+    return NULL;
+}
+
 typedef enum {
 
     COMM_MGMT_MASTER,
     COMM_MGMT_BACKUP
 } conn_mgmt_mastership_state;
+
+static inline unsigned char *
+conn_mgmt_get_conn_mastership_state_str(
+	conn_mgmt_mastership_state mastership) {
+
+    switch(mastership){
+        case COMM_MGMT_MASTER:
+            return "master";
+        case COMM_MGMT_BACKUP:
+            return "backup";
+        default: ;
+    }
+    return NULL;
+}
+
+
 
 #define CONN_MGMT_MAX_CLIENTS_SUPPORTED	8
 #define CONN_MGMT_DEFAULT_KA_INTERVAL   5
