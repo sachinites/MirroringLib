@@ -189,6 +189,9 @@ conn_mgmt_configure_connection(char *conn_name,
     						   uint16_t dst_port_no,
     						   char *mastership);
 
+void
+conn_mgmt_ui_destory_connection(char *conn_name);
+
 conn_mgmt_conn_state_t *
 conn_mgmt_lookup_connection_by_name(char *conn_name);
 

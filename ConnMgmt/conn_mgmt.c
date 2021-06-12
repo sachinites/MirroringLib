@@ -521,6 +521,29 @@ conn_mgmt_configure_connection(char *conn_name,
 }
 
 static void
+conn_mgmt_destroy_connection(conn_mgmt_conn_state_t *conn) {
+
+
+}
+
+
+void
+conn_mgmt_ui_destory_connection(char *conn_name) {
+
+	conn_mgmt_conn_state_t *conn;
+	
+	conn = conn_mgmt_lookup_connection_by_name(conn_name);
+	
+	if (!conn) {
+		printf("connection %s could not be found\n", conn_name);
+		return;
+	}
+	
+	conn_mgmt_destroy_connection(conn);
+}
+
+
+static void
 conn_mgmt_print_connection_details(conn_mgmt_conn_state_t *conn) {
 
 	printf("conn name : %s\n", conn->conn_name);

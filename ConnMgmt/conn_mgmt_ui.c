@@ -25,6 +25,8 @@
 #define CMD_CODE_CONFIG_CONNECTION_PARAMS   2
 #define CMD_CODE_SWITCHOVER					3
 #define CMD_CODE_SHOW_CONNECTIONS 			4
+#define CMD_CODE_CONFIG_CONNECTION_KA_STOP	5
+#define CMD_CODE_CONFIG_CONNECTION_KA_INTERVAL	6
 
    							
 static int
@@ -38,8 +40,10 @@ connection_config_handler(param_t *param,
 	uint16_t src_port_no;
 	uint16_t dst_port_no;
 	char *mastership = NULL;
-	
+	int cmd_code;
 	tlv_struct_t *tlv = NULL;
+	
+	cmd_code = EXTRACT_CMD_CODE(tlv_buf);
 	
 	TLV_LOOP_BEGIN(tlv_buf, tlv){
 
@@ -60,9 +64,29 @@ connection_config_handler(param_t *param,
 		
     }TLV_LOOP_END;
     
-    conn_mgmt_configure_connection(conn_name, src_ip, src_port_no,
+    switch(cmd_code) {
+    	case CMD_CODE_CONFIG_CONNECTION:
+    	switch(enable_or_disable) {
+    		case CONFIG_ENABLE:
+    			break;
+    		case CONFIG_DISABLE:
+    			conn_mgmt_ui_destory_connection(conn_name);
+    			break;
+    		default:
+    		;
+    	}
+    	break;
+    	case CMD_CODE_CONFIG_CONNECTION_PARAMS:
+    	conn_mgmt_configure_connection(conn_name, src_ip, src_port_no,
     								dst_ip, dst_port_no, mastership);
-    								
+    	break;
+    	case CMD_CODE_CONFIG_CONNECTION_KA_STOP:
+    	break;
+    	case CMD_CODE_CONFIG_CONNECTION_KA_INTERVAL:
+    	break;
+    	default:
+    	;
+    }			
     return 0;
 }
 
@@ -148,6 +172,32 @@ conn_mgmt_build_cli() {
                     }
                 }
             }
+            {
+            	/* config connection <conn-name> keep-alive ... */
+            	static param_t keep_alive;
+            	init_param(&keep_alive, CMD, "keep-alive", 0, 0, INVALID, 0, "Keep Alive Options");
+            	libcli_register_param(&conn_name, &keep_alive);
+            	{
+	            	/* config connection <conn-name> keep-alive stop */
+            		static param_t ka_stop;
+	            	init_param(&ka_stop, CMD, "stop", connection_config_handler, 0, INVALID, 0, "Stop");
+    	        	libcli_register_param(&keep_alive, &ka_stop);
+    	        	set_param_cmd_code(&ka_stop, CMD_CODE_CONFIG_CONNECTION_KA_STOP);
+            	}
+            	{
+	            	/* config connection <conn-name> keep-alive interval */
+            		static param_t ka_interval;
+	            	init_param(&ka_interval, CMD, "interval", 0, 0, INVALID, 0, "KA interval in sec");
+    	        	libcli_register_param(&keep_alive, &ka_interval);
+    	        	/* config connection <conn-name> keep-alive interval <interval-value in sec>*/
+    	        	{
+    	        		static param_t interval_value;
+                        init_param(&interval_value, LEAF, 0, connection_config_handler, 0, INT, "interval-val", "KA interval value in sec");
+                        libcli_register_param(&ka_interval, &interval_value);
+                        set_param_cmd_code(&interval_value, CMD_CODE_CONFIG_CONNECTION_KA_INTERVAL);
+    	        	}
+            	}
+            }
         }
         support_cmd_negation(&connection);
     }
@@ -168,6 +218,7 @@ conn_mgmt_build_cli() {
         libcli_register_param(show_hook, &connections);
         set_param_cmd_code(&connections, CMD_CODE_SHOW_CONNECTIONS);
         {
+	        /* show connections <conn-name>*/
         	static param_t conn_name;
             init_param(&conn_name, LEAF, 0, show_connections_handler, 0, STRING, "conn-name", "Connection Name");
             libcli_register_param(&connections, &conn_name);
